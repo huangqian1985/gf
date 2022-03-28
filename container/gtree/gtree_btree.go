@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/emirpasic/gods/trees/btree"
 	"strings"
 
 	"github.com/gogf/gf/v2/container/gvar"
@@ -21,12 +22,17 @@ import (
 
 // BTree holds elements of the B-tree.
 type BTree struct {
-	mu         rwmutex.RWMutex
-	root       *BTreeNode
-	comparator func(v1, v2 interface{}) int
-	size       int // Total number of keys in the tree
-	m          int // order (maximum number of children)
+	bTree *btree.Tree
+	mu    rwmutex.RWMutex
 }
+
+//type BTree struct {
+//	mu         rwmutex.RWMutex
+//	root       *BTreeNode
+//	comparator func(v1, v2 interface{}) int
+//	size       int // Total number of keys in the tree
+//	m          int // order (maximum number of children)
+//}
 
 // BTreeNode is a single element within the tree.
 type BTreeNode struct {
@@ -50,9 +56,8 @@ func NewBTree(m int, comparator func(v1, v2 interface{}) int, safe ...bool) *BTr
 		panic("Invalid order, should be at least 3")
 	}
 	return &BTree{
-		comparator: comparator,
-		mu:         rwmutex.Create(safe...),
-		m:          m,
+		bTree: btree.NewWith(m, comparator),
+		mu:    rwmutex.Create(safe...),
 	}
 }
 
@@ -69,8 +74,8 @@ func NewBTreeFrom(m int, comparator func(v1, v2 interface{}) int, data map[inter
 
 // Clone returns a new tree with a copy of current tree.
 func (tree *BTree) Clone() *BTree {
-	newTree := NewBTree(tree.m, tree.comparator, tree.mu.IsSafe())
-	newTree.Sets(tree.Map())
+	cloneBTree := *tree.bTree
+	newTree := &BTree{bTree: &cloneBTree, mu: tree.mu}
 	return newTree
 }
 
@@ -84,16 +89,7 @@ func (tree *BTree) Set(key interface{}, value interface{}) {
 // doSet inserts key-value pair node into the tree.
 // If key already exists, then its value is updated with the new value.
 func (tree *BTree) doSet(key interface{}, value interface{}) {
-	entry := &BTreeEntry{Key: key, Value: value}
-	if tree.root == nil {
-		tree.root = &BTreeNode{Entries: []*BTreeEntry{entry}, Children: []*BTreeNode{}}
-		tree.size++
-		return
-	}
-
-	if tree.insert(tree.root, entry) {
-		tree.size++
-	}
+	tree.bTree.Put(key, value)
 }
 
 // Sets batch sets key-values to the tree.
@@ -236,11 +232,9 @@ func (tree *BTree) Contains(key interface{}) bool {
 // doRemove removes the node from the tree by key.
 // Key should adhere to the comparator's type assertion, otherwise method panics.
 func (tree *BTree) doRemove(key interface{}) (value interface{}) {
-	node, index, found := tree.searchRecursively(tree.root, key)
-	if found {
-		value = node.Entries[index].Value
-		tree.delete(node, index)
-		tree.size--
+	if value, found := tree.bTree.Get(key); found {
+		tree.bTree.Remove(key)
+		return value
 	}
 	return
 }
@@ -270,31 +264,21 @@ func (tree *BTree) IsEmpty() bool {
 func (tree *BTree) Size() int {
 	tree.mu.RLock()
 	defer tree.mu.RUnlock()
-	return tree.size
+	return tree.bTree.Size()
 }
 
 // Keys returns all keys in asc order.
 func (tree *BTree) Keys() []interface{} {
-	keys := make([]interface{}, tree.Size())
-	index := 0
-	tree.IteratorAsc(func(key, value interface{}) bool {
-		keys[index] = key
-		index++
-		return true
-	})
-	return keys
+	tree.mu.RLock()
+	defer tree.mu.RUnlock()
+	return tree.bTree.Keys()
 }
 
 // Values returns all values in asc order based on the key.
 func (tree *BTree) Values() []interface{} {
-	values := make([]interface{}, tree.Size())
-	index := 0
-	tree.IteratorAsc(func(key, value interface{}) bool {
-		values[index] = value
-		index++
-		return true
-	})
-	return values
+	tree.mu.RLock()
+	defer tree.mu.RUnlock()
+	return tree.bTree.Keys()
 }
 
 // Map returns all key-value items as map.
@@ -321,16 +305,14 @@ func (tree *BTree) MapStrAny() map[string]interface{} {
 func (tree *BTree) Clear() {
 	tree.mu.Lock()
 	defer tree.mu.Unlock()
-	tree.root = nil
-	tree.size = 0
+	tree.bTree.Clear()
 }
 
 // Replace the data of the tree with given `data`.
 func (tree *BTree) Replace(data map[interface{}]interface{}) {
 	tree.mu.Lock()
 	defer tree.mu.Unlock()
-	tree.root = nil
-	tree.size = 0
+	tree.bTree.Clear()
 	for k, v := range data {
 		tree.doSet(k, v)
 	}
@@ -340,14 +322,14 @@ func (tree *BTree) Replace(data map[interface{}]interface{}) {
 func (tree *BTree) Height() int {
 	tree.mu.RLock()
 	defer tree.mu.RUnlock()
-	return tree.root.height()
+	return tree.bTree.Height()
 }
 
 // Left returns the left-most (min) entry or nil if tree is empty.
 func (tree *BTree) Left() *BTreeEntry {
 	tree.mu.RLock()
 	defer tree.mu.RUnlock()
-	node := tree.left(tree.root)
+	node := tree.left(tree.bTree.Root)
 	if node != nil {
 		return node.Entries[0]
 	}
@@ -772,7 +754,7 @@ func setParent(nodes []*BTreeNode, parent *BTreeNode) {
 }
 
 func (tree *BTree) left(node *BTreeNode) *BTreeNode {
-	if tree.size == 0 {
+	if tree.bTree.Empty() {
 		return nil
 	}
 	current := node
