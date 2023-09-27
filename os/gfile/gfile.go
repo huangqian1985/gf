@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -31,7 +30,7 @@ const (
 	DefaultPermOpen = os.FileMode(0666)
 
 	// DefaultPermCopy is the default perm for file/folder copy.
-	DefaultPermCopy = os.FileMode(0777)
+	DefaultPermCopy = os.FileMode(0755)
 )
 
 var (
@@ -42,16 +41,9 @@ var (
 	// selfPath is the current running binary path.
 	// As it is most commonly used, it is so defined as an internal package variable.
 	selfPath = ""
-
-	// Temporary directory of system.
-	tempDir = "/tmp"
 )
 
 func init() {
-	// Initialize internal package variable: tempDir.
-	if runtime.GOOS == "windows" || Separator != "/" || !Exists(tempDir) {
-		tempDir = os.TempDir()
-	}
 	// Initialize internal package variable: selfPath.
 	selfPath, _ = exec.LookPath(os.Args[0])
 	if selfPath != "" {
@@ -72,7 +64,7 @@ func Mkdir(path string) (err error) {
 	return nil
 }
 
-// Create creates file with given `path` recursively.
+// Create creates a file with given `path` recursively.
 // The parameter `path` is suggested to be absolute path.
 func Create(path string) (*os.File, error) {
 	dir := Dir(path)
@@ -445,14 +437,13 @@ func ExtName(path string) string {
 }
 
 // Temp retrieves and returns the temporary directory of current system.
-// It returns "/tmp" is current in *nix system, or else it returns os.TempDir().
 //
 // The optional parameter `names` specifies the sub-folders/sub-files,
 // which will be joined with current system separator and returned with the path.
 func Temp(names ...string) string {
-	path := tempDir
+	path := os.TempDir()
 	for _, name := range names {
-		path += Separator + name
+		path = Join(path, name)
 	}
 	return path
 }

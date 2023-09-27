@@ -7,8 +7,8 @@
 // Package pgsql implements gdb.Driver, which supports operations for database PostgreSQL.
 //
 // Note:
-// 1. It needs manually import: _ "github.com/lib/pq"
-// 2. It does not support Save/Replace features.
+// 1. It does not support Save/Replace features.
+// 2. It does not support Insert Ignore features.
 package pgsql
 
 import (
@@ -16,6 +16,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	_ "github.com/lib/pq"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gcode"
@@ -25,7 +27,6 @@ import (
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
 	"github.com/gogf/gf/v2/util/gutil"
-	_ "github.com/lib/pq"
 )
 
 // Driver is the driver for postgresql database.
@@ -35,8 +36,8 @@ type Driver struct {
 
 const (
 	internalPrimaryKeyInCtx gctx.StrKey = "primary_key"
-	defaultSchema                       = "public"
-	quoteChar                           = `"`
+	defaultSchema           string      = "public"
+	quoteChar               string      = `"`
 )
 
 func init() {
@@ -87,6 +88,10 @@ func (d *Driver) Open(config *gdb.ConfigNode) (db *sql.DB, err error) {
 			)
 		}
 
+		if config.Namespace != "" {
+			source = fmt.Sprintf("%s search_path=%s", source, config.Namespace)
+		}
+
 		if config.Timezone != "" {
 			source = fmt.Sprintf("%s timezone=%s", source, config.Timezone)
 		}
@@ -118,7 +123,7 @@ func (d *Driver) GetChars() (charLeft string, charRight string) {
 }
 
 // CheckLocalTypeForField checks and returns corresponding local golang type for given db type.
-func (d *Driver) CheckLocalTypeForField(ctx context.Context, fieldType string, fieldValue interface{}) (string, error) {
+func (d *Driver) CheckLocalTypeForField(ctx context.Context, fieldType string, fieldValue interface{}) (gdb.LocalType, error) {
 	var typeName string
 	match, _ := gregex.MatchString(`(.+?)\((.+)\)`, fieldType)
 	if len(match) == 3 {
@@ -200,24 +205,21 @@ func (d *Driver) ConvertValueForLocal(ctx context.Context, fieldType string, fie
 
 // DoFilter deals with the sql string before commits it to underlying sql driver.
 func (d *Driver) DoFilter(ctx context.Context, link gdb.Link, sql string, args []interface{}) (newSql string, newArgs []interface{}, err error) {
-	defer func() {
-		newSql, newArgs, err = d.Core.DoFilter(ctx, link, newSql, newArgs)
-	}()
 	var index int
 	// Convert placeholder char '?' to string "$x".
-	sql, _ = gregex.ReplaceStringFunc(`\?`, sql, func(s string) string {
+	newSql, _ = gregex.ReplaceStringFunc(`\?`, sql, func(s string) string {
 		index++
 		return fmt.Sprintf(`$%d`, index)
 	})
-	// Handle pgsql jsonb feature support, which contains place holder char '?'.
+	// Handle pgsql jsonb feature support, which contains place-holder char '?'.
 	// Refer:
 	// https://github.com/gogf/gf/issues/1537
 	// https://www.postgresql.org/docs/12/functions-json.html
-	sql, _ = gregex.ReplaceStringFuncMatch(`(::jsonb([^\w\d]*)\$\d)`, sql, func(match []string) string {
+	newSql, _ = gregex.ReplaceStringFuncMatch(`(::jsonb([^\w\d]*)\$\d)`, newSql, func(match []string) string {
 		return fmt.Sprintf(`::jsonb%s?`, match[2])
 	})
-	newSql, _ = gregex.ReplaceString(` LIMIT (\d+),\s*(\d+)`, ` LIMIT $2 OFFSET $1`, sql)
-	return newSql, args, nil
+	newSql, _ = gregex.ReplaceString(` LIMIT (\d+),\s*(\d+)`, ` LIMIT $2 OFFSET $1`, newSql)
+	return d.Core.DoFilter(ctx, link, newSql, args)
 }
 
 // Tables retrieves and returns the tables of current schema.
@@ -265,13 +267,12 @@ ORDER BY
 }
 
 // TableFields retrieves and returns the fields' information of specified table of current schema.
-//
-// Also see DriverMysql.TableFields.
 func (d *Driver) TableFields(ctx context.Context, table string, schema ...string) (fields map[string]*gdb.TableField, err error) {
 	var (
-		result       gdb.Result
-		link         gdb.Link
-		usedSchema   = gutil.GetOrDefaultStr(d.GetSchema(), schema...)
+		result     gdb.Result
+		link       gdb.Link
+		usedSchema = gutil.GetOrDefaultStr(d.GetSchema(), schema...)
+		// TODO duplicated `id` result?
 		structureSql = fmt.Sprintf(`
 SELECT a.attname AS field, t.typname AS type,a.attnotnull as null,
     (case when d.contype is not null then 'pri' else '' end)  as key
@@ -298,21 +299,32 @@ ORDER BY a.attnum`,
 		return nil, err
 	}
 	fields = make(map[string]*gdb.TableField)
-	for i, m := range result {
-		fields[m["field"].String()] = &gdb.TableField{
-			Index:   i,
-			Name:    m["field"].String(),
+	var (
+		index = 0
+		name  string
+		ok    bool
+	)
+	for _, m := range result {
+		name = m["field"].String()
+		// Filter duplicated fields.
+		if _, ok = fields[name]; ok {
+			continue
+		}
+		fields[name] = &gdb.TableField{
+			Index:   index,
+			Name:    name,
 			Type:    m["type"].String(),
 			Null:    !m["null"].Bool(),
 			Key:     m["key"].String(),
 			Default: m["default_value"].Val(),
 			Comment: m["comment"].String(),
 		}
+		index++
 	}
 	return fields, nil
 }
 
-// DoInsert is not supported in pgsql.
+// DoInsert inserts or updates data forF given table.
 func (d *Driver) DoInsert(ctx context.Context, link gdb.Link, table string, list gdb.List, option gdb.DoInsertOption) (result sql.Result, err error) {
 	switch option.InsertOption {
 	case gdb.InsertOptionSave:
@@ -348,6 +360,8 @@ func (d *Driver) DoInsert(ctx context.Context, link gdb.Link, table string, list
 	return d.Core.DoInsert(ctx, link, table, list, option)
 }
 
+// DoExec commits the sql string and its arguments to underlying driver
+// through given link object and returns the execution result.
 func (d *Driver) DoExec(ctx context.Context, link gdb.Link, sql string, args ...interface{}) (result sql.Result, err error) {
 	var (
 		isUseCoreDoExec bool   = false // Check whether the default method needs to be used
@@ -356,14 +370,22 @@ func (d *Driver) DoExec(ctx context.Context, link gdb.Link, sql string, args ...
 	)
 
 	// Transaction checks.
-	if link != nil && link.IsTransaction() {
-		isUseCoreDoExec = true
-	} else {
+	if link == nil {
 		if tx := gdb.TXFromCtx(ctx, d.GetGroup()); tx != nil {
-			isUseCoreDoExec = true
+			// Firstly, check and retrieve transaction link from context.
+			link = tx
+		} else if link, err = d.MasterLink(); err != nil {
+			// Or else it creates one from master node.
+			return nil, err
+		}
+	} else if !link.IsTransaction() {
+		// If current link is not transaction link, it checks and retrieves transaction from context.
+		if tx := gdb.TXFromCtx(ctx, d.GetGroup()); tx != nil {
+			link = tx
 		}
 	}
 
+	// Check if it is an insert operation with primary key.
 	if value := ctx.Value(internalPrimaryKeyInCtx); value != nil {
 		var ok bool
 		pkField, ok = value.(gdb.TableField)
@@ -392,8 +414,7 @@ func (d *Driver) DoExec(ctx context.Context, link gdb.Link, sql string, args ...
 	}
 
 	// Sql filtering.
-	// TODO: internal function formatSql
-	// sql, args = formatSql(sql, args)
+	sql, args = d.FormatSqlBeforeExecuting(sql, args)
 	sql, args, err = d.DoFilter(ctx, link, sql, args)
 	if err != nil {
 		return nil, err
@@ -426,10 +447,10 @@ func (d *Driver) DoExec(ctx context.Context, link gdb.Link, sql string, args ...
 		}
 
 		if out.Records[affected-1][primaryKey] != nil {
-			lastInsertId := out.Records[affected-1][primaryKey].Int()
+			lastInsertId := out.Records[affected-1][primaryKey].Int64()
 			return Result{
 				affected:     int64(affected),
-				lastInsertId: int64(lastInsertId),
+				lastInsertId: lastInsertId,
 			}, nil
 		}
 	}

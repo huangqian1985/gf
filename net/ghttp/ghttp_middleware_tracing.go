@@ -9,7 +9,7 @@ package ghttp
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/gogf/gf/v2"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/internal/httputil"
 	"github.com/gogf/gf/v2/internal/utils"
 	"github.com/gogf/gf/v2/net/gtrace"
@@ -35,6 +36,7 @@ const (
 	tracingEventHttpResponse                    = "http.response"
 	tracingEventHttpResponseHeaders             = "http.response.headers"
 	tracingEventHttpResponseBody                = "http.response.body"
+	tracingEventHttpRequestUrl                  = "http.request.url"
 	tracingMiddlewareHandled        gctx.StrKey = `MiddlewareServerTracingHandled`
 )
 
@@ -63,7 +65,7 @@ func internalMiddlewareServerTracing(r *Request) {
 			ctx,
 			propagation.HeaderCarrier(r.Header),
 		),
-		r.URL.String(),
+		r.URL.Path,
 		trace.WithSpanKind(trace.SpanKindServer),
 	)
 	defer span.End()
@@ -80,10 +82,16 @@ func internalMiddlewareServerTracing(r *Request) {
 	}
 
 	// Request content logging.
-	reqBodyContentBytes, _ := ioutil.ReadAll(r.Body)
+	reqBodyContentBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		r.SetError(gerror.Wrap(err, `read request body failed`))
+		span.SetStatus(codes.Error, fmt.Sprintf(`%+v`, err))
+		return
+	}
 	r.Body = utils.NewReadCloser(reqBodyContentBytes, false)
 
 	span.AddEvent(tracingEventHttpRequest, trace.WithAttributes(
+		attribute.String(tracingEventHttpRequestUrl, r.URL.String()),
 		attribute.String(tracingEventHttpRequestHeaders, gconv.String(httputil.HeaderToMap(r.Header))),
 		attribute.String(tracingEventHttpRequestBaggage, gtrace.GetBaggageMap(ctx).String()),
 		attribute.String(tracingEventHttpRequestBody, gstr.StrLimit(
@@ -97,7 +105,7 @@ func internalMiddlewareServerTracing(r *Request) {
 	r.Middleware.Next()
 
 	// Error logging.
-	if err := r.GetError(); err != nil {
+	if err = r.GetError(); err != nil {
 		span.SetStatus(codes.Error, fmt.Sprintf(`%+v`, err))
 	}
 	// Response content logging.

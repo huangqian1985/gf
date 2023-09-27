@@ -10,10 +10,12 @@ package gdb
 import (
 	"context"
 	"database/sql"
-	"github.com/gogf/gf/v2/util/gconv"
+	"reflect"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
-	"reflect"
+
+	"github.com/gogf/gf/v2/util/gconv"
 
 	"github.com/gogf/gf/v2"
 	"github.com/gogf/gf/v2/container/gvar"
@@ -54,7 +56,7 @@ func (c *Core) DoQuery(ctx context.Context, link Link, sql string, args ...inter
 	}
 
 	// Sql filtering.
-	sql, args = formatSql(sql, args)
+	sql, args = c.FormatSqlBeforeExecuting(sql, args)
 	sql, args, err = c.db.DoFilter(ctx, link, sql, args)
 	if err != nil {
 		return nil, err
@@ -115,7 +117,7 @@ func (c *Core) DoExec(ctx context.Context, link Link, sql string, args ...interf
 	}
 
 	// SQL filtering.
-	sql, args = formatSql(sql, args)
+	sql, args = c.FormatSqlBeforeExecuting(sql, args)
 	sql, args, err = c.db.DoFilter(ctx, link, sql, args)
 	if err != nil {
 		return nil, err

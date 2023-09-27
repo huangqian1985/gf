@@ -44,7 +44,12 @@ type iInterfaces interface {
 	Interfaces() []interface{}
 }
 
-// iTableName is the interface for retrieving table name fro struct.
+// iNil if the type assert api for IsNil.
+type iNil interface {
+	IsNil() bool
+}
+
+// iTableName is the interface for retrieving table name for struct.
 type iTableName interface {
 	TableName() string
 }
@@ -62,7 +67,7 @@ var (
 	// quoteWordReg is the regular expression object for a word check.
 	quoteWordReg = regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`)
 
-	// Priority tags for struct converting for orm field mapping.
+	// structTagPriority tags for struct converting for orm field mapping.
 	structTagPriority = append([]string{OrmTagForStruct}, gconv.StructTagPriority...)
 )
 
@@ -191,17 +196,21 @@ func ListItemValuesUnique(list interface{}, key string, subKey ...interface{}) [
 }
 
 // GetInsertOperationByOption returns proper insert option with given parameter `option`.
-func GetInsertOperationByOption(option int) string {
+func GetInsertOperationByOption(option InsertOption) string {
 	var operator string
 	switch option {
 	case InsertOptionReplace:
-		operator = "REPLACE"
+		operator = InsertOperationReplace
 	case InsertOptionIgnore:
-		operator = "INSERT IGNORE"
+		operator = InsertOperationIgnore
 	default:
-		operator = "INSERT"
+		operator = InsertOperationInsert
 	}
 	return operator
+}
+
+func anyValueToMapBeforeToRecord(value interface{}) map[string]interface{} {
+	return gconv.Map(value, structTagPriority...)
 }
 
 // DataToMapDeep converts `value` to map type recursively(if attribute struct is embedded).
@@ -213,20 +222,12 @@ func DataToMapDeep(value interface{}) map[string]interface{} {
 		switch v.(type) {
 		case time.Time, *time.Time, gtime.Time, *gtime.Time, gjson.Json, *gjson.Json:
 			m[k] = v
-
-		default:
-			// Use string conversion in default.
-			if s, ok := v.(iString); ok {
-				m[k] = s.String()
-			} else {
-				m[k] = v
-			}
 		}
 	}
 	return m
 }
 
-// doHandleTableName adds prefix string and quote chars for table name. It handles table string like:
+// doQuoteTableName adds prefix string and quote chars for table name. It handles table string like:
 // "user", "user u", "user,user_detail", "user u, user_detail ut", "user as u, user_detail as ut",
 // "user.user u", "`user`.`user` u".
 //
@@ -310,9 +311,12 @@ func getFieldsFromStructOrMap(structOrMap interface{}) (fields []string) {
 			Pointer:         structOrMap,
 			RecursiveOption: gstructs.RecursiveOptionEmbeddedNoTag,
 		})
+		var ormTagValue string
 		for _, structField := range structFields {
-			if tag := structField.Tag(OrmTagForStruct); tag != "" && gregex.IsMatchString(regularFieldNameRegPattern, tag) {
-				fields = append(fields, tag)
+			ormTagValue = structField.Tag(OrmTagForStruct)
+			ormTagValue = gstr.Split(gstr.Trim(ormTagValue), ",")[0]
+			if ormTagValue != "" && gregex.IsMatchString(regularFieldNameRegPattern, ormTagValue) {
+				fields = append(fields, ormTagValue)
 			} else {
 				fields = append(fields, structField.Name())
 			}
@@ -363,17 +367,6 @@ func GetPrimaryKeyCondition(primary string, where ...interface{}) (newWhereCondi
 		}
 	}
 	return where
-}
-
-// formatSql formats the sql string and its arguments before executing.
-// The internal handleArguments function might be called twice during the SQL procedure,
-// but do not worry about it, it's safe and efficient.
-func formatSql(sql string, args []interface{}) (newSql string, newArgs []interface{}) {
-	// DO NOT do this as there may be multiple lines and comments in the sql.
-	// sql = gstr.Trim(sql)
-	// sql = gstr.Replace(sql, "\n", " ")
-	// sql, _ = gregex.ReplaceString(`\s{2,}`, ` `, sql)
-	return handleArguments(sql, args)
 }
 
 type formatWhereHolderInput struct {
@@ -494,9 +487,16 @@ func formatWhereHolder(ctx context.Context, db DB, in formatWhereHolderInput) (n
 			data, _ = db.GetCore().mappingAndFilterData(ctx, in.Schema, in.Table, data, true)
 		}
 		// Put the struct attributes in sequence in Where statement.
+		var ormTagValue string
 		for i := 0; i < reflectType.NumField(); i++ {
 			structField = reflectType.Field(i)
-			foundKey, foundValue := gutil.MapPossibleItemByKey(data, structField.Name)
+			// Use tag value from `orm` as field name if specified.
+			ormTagValue = structField.Tag.Get(OrmTagForStruct)
+			ormTagValue = gstr.Split(gstr.Trim(ormTagValue), ",")[0]
+			if ormTagValue == "" {
+				ormTagValue = structField.Name
+			}
+			foundKey, foundValue := gutil.MapPossibleItemByKey(data, ormTagValue)
 			if foundKey != "" {
 				if in.OmitNil && empty.IsNil(foundValue) {
 					continue

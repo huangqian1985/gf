@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime/multipart"
 	"net/http"
 	"reflect"
@@ -108,6 +107,7 @@ func (r *Request) doParse(pointer interface{}, requestType int) error {
 				return err
 			}
 		}
+		// TODO: https://github.com/gogf/gf/pull/2450
 		// Validation.
 		if err = gvalid.New().
 			Bail().
@@ -153,16 +153,23 @@ func (r *Request) Get(key string, def ...interface{}) *gvar.Var {
 // It can be called multiple times retrieving the same body content.
 func (r *Request) GetBody() []byte {
 	if r.bodyContent == nil {
+		r.bodyContent = r.MakeBodyRepeatableRead(true)
+	}
+	return r.bodyContent
+}
+
+func (r *Request) MakeBodyRepeatableRead(repeatableRead bool) []byte {
+	if r.bodyContent == nil {
 		var err error
-		if r.bodyContent, err = ioutil.ReadAll(r.Body); err != nil {
+		if r.bodyContent, err = io.ReadAll(r.Body); err != nil {
 			errMsg := `Read from request Body failed`
 			if gerror.Is(err, io.EOF) {
 				errMsg += `, the Body might be closed or read manually from middleware/hook/other package previously`
 			}
 			panic(gerror.WrapCode(gcode.CodeInternalError, err, errMsg))
 		}
-		r.Body = utils.NewReadCloser(r.bodyContent, true)
 	}
+	r.Body = utils.NewReadCloser(r.bodyContent, repeatableRead)
 	return r.bodyContent
 }
 
@@ -260,6 +267,8 @@ func (r *Request) parseForm() {
 		return
 	}
 	if contentType := r.Header.Get("Content-Type"); contentType != "" {
+		r.MakeBodyRepeatableRead(true)
+
 		var err error
 		if gstr.Contains(contentType, "multipart/") {
 			// multipart/form-data, multipart/mixed
@@ -273,7 +282,7 @@ func (r *Request) parseForm() {
 			}
 		}
 		if len(r.PostForm) > 0 {
-			// Re-parse the form data using united parsing way.
+			// Parse the form data using united parsing way.
 			params := ""
 			for name, values := range r.PostForm {
 				// Invalid parameter name.

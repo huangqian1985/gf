@@ -383,3 +383,39 @@ func Test_IntIntMap_DeepCopy(t *testing.T) {
 		t.AssertNE(m.Get(1), n.Get(1))
 	})
 }
+
+func Test_IntIntMap_IsSubOf(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		m1 := gmap.NewIntAnyMapFrom(g.MapIntAny{
+			1: 1,
+			2: 2,
+		})
+		m2 := gmap.NewIntAnyMapFrom(g.MapIntAny{
+			2: 2,
+		})
+		t.Assert(m1.IsSubOf(m2), false)
+		t.Assert(m2.IsSubOf(m1), true)
+		t.Assert(m2.IsSubOf(m2), true)
+	})
+}
+
+func Test_IntIntMap_Diff(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		m1 := gmap.NewIntIntMapFrom(g.MapIntInt{
+			0: 0,
+			1: 1,
+			2: 2,
+			3: 3,
+		})
+		m2 := gmap.NewIntIntMapFrom(g.MapIntInt{
+			0: 0,
+			2: 2,
+			3: 31,
+			4: 4,
+		})
+		addedKeys, removedKeys, updatedKeys := m1.Diff(m2)
+		t.Assert(addedKeys, []int{4})
+		t.Assert(removedKeys, []int{1})
+		t.Assert(updatedKeys, []int{3})
+	})
+}

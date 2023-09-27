@@ -3134,9 +3134,9 @@ func createTableForTimeZoneTest() string {
 	        passport    varchar(45) NULL,
 	        password    char(32) NULL,
 	        nickname    varchar(45) NULL,
-	        created_at timestamp NULL,
- 			updated_at timestamp NULL,
-			deleted_at timestamp NULL,
+	        created_at timestamp(6) NULL,
+ 			updated_at timestamp(6) NULL,
+			deleted_at timestamp(6) NULL,
 	        PRIMARY KEY (id)
 	    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 	    `, tableName,
@@ -3849,7 +3849,7 @@ func Test_Model_FieldCount(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["id"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -3862,7 +3862,7 @@ func Test_Model_FieldMax(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["id"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -3875,7 +3875,7 @@ func Test_Model_FieldMin(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["id"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -3888,7 +3888,7 @@ func Test_Model_FieldAvg(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["id"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -4663,5 +4663,46 @@ func Test_Builder_OmitEmptyWhere(t *testing.T) {
 		).Count()
 		t.AssertNil(err)
 		t.Assert(count, int64(TableSize))
+	})
+}
+
+func Test_Scan_Nil_Result_Error(t *testing.T) {
+	table := createInitTable()
+	defer dropTable(table)
+
+	type S struct {
+		Id    int
+		Name  string
+		Age   int
+		Score int
+	}
+	gtest.C(t, func(t *gtest.T) {
+		var s *S
+		err := db.Model(table).Where("id", 1).Scan(&s)
+		t.AssertNil(err)
+		t.Assert(s.Id, 1)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		var s *S
+		err := db.Model(table).Where("id", 100).Scan(&s)
+		t.AssertNil(err)
+		t.Assert(s, nil)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		var s S
+		err := db.Model(table).Where("id", 100).Scan(&s)
+		t.Assert(err, sql.ErrNoRows)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		var ss []*S
+		err := db.Model(table).Scan(&ss)
+		t.AssertNil(err)
+		t.Assert(len(ss), TableSize)
+	})
+	// If the result is empty, it returns error.
+	gtest.C(t, func(t *gtest.T) {
+		var ss = make([]*S, 10)
+		err := db.Model(table).WhereGT("id", 100).Scan(&ss)
+		t.Assert(err, sql.ErrNoRows)
 	})
 }

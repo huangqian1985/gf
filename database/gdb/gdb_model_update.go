@@ -9,8 +9,9 @@ package gdb
 import (
 	"database/sql"
 	"fmt"
-	"github.com/gogf/gf/v2/internal/intlog"
 	"reflect"
+
+	"github.com/gogf/gf/v2/internal/intlog"
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -57,14 +58,10 @@ func (m *Model) Update(dataAndWhere ...interface{}) (result sql.Result, err erro
 
 	switch reflectInfo.OriginKind {
 	case reflect.Map, reflect.Struct:
-		var dataMap map[string]interface{}
-		dataMap, err = m.db.ConvertDataForRecord(ctx, m.data)
-		if err != nil {
-			return nil, err
-		}
+		var dataMap = anyValueToMapBeforeToRecord(m.data)
 		// Automatically update the record updating time.
 		if fieldNameUpdate != "" {
-			dataMap[fieldNameUpdate] = gtime.Now().String()
+			dataMap[fieldNameUpdate] = gtime.Now()
 		}
 		updateData = dataMap
 
@@ -73,7 +70,8 @@ func (m *Model) Update(dataAndWhere ...interface{}) (result sql.Result, err erro
 		// Automatically update the record updating time.
 		if fieldNameUpdate != "" {
 			if fieldNameUpdate != "" && !gstr.Contains(updates, fieldNameUpdate) {
-				updates += fmt.Sprintf(`,%s='%s'`, fieldNameUpdate, gtime.Now().String())
+				updates += fmt.Sprintf(`,%s=?`, fieldNameUpdate)
+				conditionArgs = append([]interface{}{gtime.Now()}, conditionArgs...)
 			}
 		}
 		updateData = updates
