@@ -389,3 +389,39 @@ func Test_StrIntMap_DeepCopy(t *testing.T) {
 		t.AssertNE(m.Get("key1"), n.Get("key1"))
 	})
 }
+
+func Test_StrIntMap_IsSubOf(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		m1 := gmap.NewStrIntMapFrom(g.MapStrInt{
+			"k1": 1,
+			"k2": 2,
+		})
+		m2 := gmap.NewStrIntMapFrom(g.MapStrInt{
+			"k2": 2,
+		})
+		t.Assert(m1.IsSubOf(m2), false)
+		t.Assert(m2.IsSubOf(m1), true)
+		t.Assert(m2.IsSubOf(m2), true)
+	})
+}
+
+func Test_StrIntMap_Diff(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		m1 := gmap.NewStrIntMapFrom(g.MapStrInt{
+			"0": 0,
+			"1": 1,
+			"2": 2,
+			"3": 3,
+		})
+		m2 := gmap.NewStrIntMapFrom(g.MapStrInt{
+			"0": 0,
+			"2": 2,
+			"3": 31,
+			"4": 4,
+		})
+		addedKeys, removedKeys, updatedKeys := m1.Diff(m2)
+		t.Assert(addedKeys, []string{"4"})
+		t.Assert(removedKeys, []string{"1"})
+		t.Assert(updatedKeys, []string{"3"})
+	})
+}

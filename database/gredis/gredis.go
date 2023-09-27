@@ -57,8 +57,8 @@ func New(config ...*Config) (*Redis, error) {
 		)
 	}
 	redis := &Redis{
-		config:       config[0],
-		localAdapter: defaultAdapterFunc(config[0]),
+		config:       usedConfig,
+		localAdapter: usedAdapter,
 	}
 	return redis.initGroup(), nil
 }

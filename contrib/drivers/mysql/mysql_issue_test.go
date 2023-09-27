@@ -532,8 +532,8 @@ func Test_Issue2338(t *testing.T) {
 CREATE TABLE %s (
     id        int(10) unsigned NOT NULL AUTO_INCREMENT COMMENT 'User ID',
     nickname  varchar(45) DEFAULT NULL COMMENT 'User Nickname',
-    create_at datetime DEFAULT NULL COMMENT 'Created Time',
-    update_at datetime DEFAULT NULL COMMENT 'Updated Time',
+    create_at datetime(6) DEFAULT NULL COMMENT 'Created Time',
+    update_at datetime(6) DEFAULT NULL COMMENT 'Updated Time',
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 	    `, table1,
@@ -544,8 +544,8 @@ CREATE TABLE %s (
 CREATE TABLE %s (
     id        int(10) unsigned NOT NULL AUTO_INCREMENT COMMENT 'User ID',
     nickname  varchar(45) DEFAULT NULL COMMENT 'User Nickname',
-    create_at datetime DEFAULT NULL COMMENT 'Created Time',
-    update_at datetime DEFAULT NULL COMMENT 'Updated Time',
+    create_at datetime(6) DEFAULT NULL COMMENT 'Created Time',
+    update_at datetime(6) DEFAULT NULL COMMENT 'Updated Time',
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 	    `, table2,
@@ -585,9 +585,9 @@ CREATE TABLE %s (
 CREATE TABLE %s (
     id        int(10) unsigned NOT NULL AUTO_INCREMENT COMMENT 'User ID',
     nickname  varchar(45) DEFAULT NULL COMMENT 'User Nickname',
-    create_at datetime DEFAULT NULL COMMENT 'Created Time',
-    update_at datetime DEFAULT NULL COMMENT 'Updated Time',
-    deleted_at datetime DEFAULT NULL COMMENT 'Deleted Time',
+    create_at datetime(6) DEFAULT NULL COMMENT 'Created Time',
+    update_at datetime(6) DEFAULT NULL COMMENT 'Updated Time',
+    deleted_at datetime(6) DEFAULT NULL COMMENT 'Deleted Time',
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 	    `, table1,
@@ -598,9 +598,9 @@ CREATE TABLE %s (
 CREATE TABLE %s (
     id        int(10) unsigned NOT NULL AUTO_INCREMENT COMMENT 'User ID',
     nickname  varchar(45) DEFAULT NULL COMMENT 'User Nickname',
-    create_at datetime DEFAULT NULL COMMENT 'Created Time',
-    update_at datetime DEFAULT NULL COMMENT 'Updated Time',
-    deleted_at datetime DEFAULT NULL COMMENT 'Deleted Time',
+    create_at datetime(6) DEFAULT NULL COMMENT 'Created Time',
+    update_at datetime(6) DEFAULT NULL COMMENT 'Updated Time',
+    deleted_at datetime(6) DEFAULT NULL COMMENT 'Deleted Time',
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 	    `, table2,
@@ -644,8 +644,8 @@ CREATE TABLE %s (
     passport  varchar(45) NOT NULL COMMENT 'User Passport',
     password  varchar(45) NOT NULL COMMENT 'User Password',
     nickname  varchar(45) NOT NULL COMMENT 'User Nickname',
-    create_at datetime DEFAULT NULL COMMENT 'Created Time',
-    update_at datetime DEFAULT NULL COMMENT 'Updated Time',
+    create_at datetime(6) DEFAULT NULL COMMENT 'Created Time',
+    update_at datetime(6) DEFAULT NULL COMMENT 'Updated Time',
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 	    `, table,
@@ -662,5 +662,138 @@ CREATE TABLE %s (
 
 		_, err3 := db.Model(table).Where(1).Delete()
 		t.AssertNil(err3)
+	})
+}
+
+// https://github.com/gogf/gf/issues/2561
+func Test_Issue2561(t *testing.T) {
+	table := createTable()
+	defer dropTable(table)
+
+	gtest.C(t, func(t *gtest.T) {
+		type User struct {
+			g.Meta     `orm:"do:true"`
+			Id         interface{}
+			Passport   interface{}
+			Password   interface{}
+			Nickname   interface{}
+			CreateTime interface{}
+		}
+		data := g.Slice{
+			User{
+				Id:       1,
+				Passport: "user_1",
+			},
+			User{
+				Id:       2,
+				Password: "pass_2",
+			},
+			User{
+				Id:       3,
+				Password: "pass_3",
+			},
+		}
+		result, err := db.Model(table).Data(data).Insert()
+		t.AssertNil(err)
+		m, _ := result.LastInsertId()
+		t.Assert(m, 3)
+
+		n, _ := result.RowsAffected()
+		t.Assert(n, 3)
+
+		one, err := db.Model(table).WherePri(1).One()
+		t.AssertNil(err)
+		t.Assert(one[`id`], `1`)
+		t.Assert(one[`passport`], `user_1`)
+		t.Assert(one[`password`], ``)
+		t.Assert(one[`nickname`], ``)
+		t.Assert(one[`create_time`], ``)
+
+		one, err = db.Model(table).WherePri(2).One()
+		t.AssertNil(err)
+		t.Assert(one[`id`], `2`)
+		t.Assert(one[`passport`], ``)
+		t.Assert(one[`password`], `pass_2`)
+		t.Assert(one[`nickname`], ``)
+		t.Assert(one[`create_time`], ``)
+
+		one, err = db.Model(table).WherePri(3).One()
+		t.AssertNil(err)
+		t.Assert(one[`id`], `3`)
+		t.Assert(one[`passport`], ``)
+		t.Assert(one[`password`], `pass_3`)
+		t.Assert(one[`nickname`], ``)
+		t.Assert(one[`create_time`], ``)
+	})
+}
+
+// https://github.com/gogf/gf/issues/2439
+func Test_Issue2439(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		array := gstr.SplitAndTrim(gtest.DataContent(`issue2439.sql`), ";")
+		for _, v := range array {
+			if _, err := db.Exec(ctx, v); err != nil {
+				gtest.Error(err)
+			}
+		}
+		defer dropTable("a")
+		defer dropTable("b")
+		defer dropTable("c")
+
+		orm := db.Model("a")
+		orm = orm.InnerJoin(
+			"c", "a.id=c.id",
+		)
+		orm = orm.InnerJoinOnField("b", "id")
+		whereFormat := fmt.Sprintf(
+			"(`%s`.`%s` LIKE ?) ",
+			"b", "name",
+		)
+		orm = orm.WhereOrf(
+			whereFormat,
+			"%a%",
+		)
+		r, err := orm.All()
+		t.AssertNil(err)
+		t.Assert(len(r), 1)
+		t.Assert(r[0]["id"], 2)
+		t.Assert(r[0]["name"], "a")
+	})
+}
+
+// https://github.com/gogf/gf/issues/2782
+func Test_Issue2787(t *testing.T) {
+	table := createTable()
+	defer dropTable(table)
+
+	gtest.C(t, func(t *gtest.T) {
+		m := db.Model("user")
+
+		condWhere, _ := m.Builder().
+			Where("id", "").
+			Where(m.Builder().
+				Where("nickname", "foo").
+				WhereOr("password", "abc123")).
+			Where("passport", "pp").
+			Build()
+		t.Assert(condWhere, "(`id`=?) AND (((`nickname`=?) OR (`password`=?))) AND (`passport`=?)")
+
+		condWhere, _ = m.OmitEmpty().Builder().
+			Where("id", "").
+			Where(m.Builder().
+				Where("nickname", "foo").
+				WhereOr("password", "abc123")).
+			Where("passport", "pp").
+			Build()
+		t.Assert(condWhere, "((`nickname`=?) OR (`password`=?)) AND (`passport`=?)")
+
+		condWhere, _ = m.OmitEmpty().Builder().
+			Where(m.Builder().
+				Where("nickname", "foo").
+				WhereOr("password", "abc123")).
+			Where("id", "").
+			Where("passport", "pp").
+			Build()
+		t.Assert(condWhere, "((`nickname`=?) OR (`password`=?)) AND (`passport`=?)")
 	})
 }

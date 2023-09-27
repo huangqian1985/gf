@@ -30,6 +30,7 @@ const (
 
 var (
 	db        gdb.DB
+	db2       gdb.DB
 	dbPrefix  gdb.DB
 	dbInvalid gdb.DB
 	ctx       = context.TODO()
@@ -68,6 +69,7 @@ func init() {
 		gtest.Error(err)
 	}
 	db = db.Schema(TestSchema1)
+	db2 = db.Schema(TestSchema2)
 
 	// Prefix db.
 	if r, err := gdb.NewByGroup("prefix"); err != nil {
@@ -117,7 +119,7 @@ func createTableWithDb(db gdb.DB, table ...string) (name string) {
 	        passport    varchar(45) NULL,
 	        password    char(32) NULL,
 	        nickname    varchar(45) NULL,
-	        create_time timestamp NULL,
+	        create_time timestamp(6) NULL,
 	        PRIMARY KEY (id)
 	    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 	    `, name,

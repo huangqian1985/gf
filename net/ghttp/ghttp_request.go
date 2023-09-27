@@ -7,7 +7,6 @@
 package ghttp
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -40,7 +39,6 @@ type Request struct {
 	// Private attributes for internal usage purpose.
 	// =================================================================================================================
 
-	context         context.Context        // Custom context for internal usage purpose.
 	handlers        []*HandlerItemParsed   // All matched handlers containing handler, hook and middleware for this request.
 	serveHandler    *HandlerItemParsed     // Real handler serving for this request, not hook or middleware.
 	handlerResponse interface{}            // Handler response object for Request/Response handler.
@@ -63,11 +61,6 @@ type Request struct {
 	viewObject      *gview.View            // Custom template view engine object for this response.
 	viewParams      gview.Params           // Custom template view variables for this response.
 	originUrlPath   string                 // Original URL path that passed from client.
-}
-
-type handlerResponse struct {
-	Object interface{}
-	Error  error
 }
 
 // staticFile is the file struct for static file service.

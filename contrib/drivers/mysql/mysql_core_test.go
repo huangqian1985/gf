@@ -8,6 +8,7 @@ package mysql_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -258,7 +259,52 @@ func Test_DB_Insert_KeyFieldNameMapping(t *testing.T) {
 	})
 }
 
-func Test_DB_Upadte_KeyFieldNameMapping(t *testing.T) {
+func Test_DB_Insert_NilGjson(t *testing.T) {
+	var tableName = "nil" + gtime.TimestampNanoStr()
+	_, err := db.Exec(ctx, fmt.Sprintf(`
+	CREATE TABLE IF NOT EXISTS %s (
+		id int(10) unsigned NOT NULL AUTO_INCREMENT,
+		json_empty_string json DEFAULT NULL,
+		json_nil json DEFAULT NULL,
+		json_null json DEFAULT NULL,
+		PRIMARY KEY (id)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+	`, tableName))
+	if err != nil {
+		gtest.Fatal(err)
+	}
+	defer dropTable(tableName)
+
+	gtest.C(t, func(t *gtest.T) {
+		type Json struct {
+			Id              int
+			JsonEmptyString *gjson.Json
+			JsonNil         *gjson.Json
+			JsonNull        *gjson.Json
+		}
+
+		data := Json{
+			Id:              1,
+			JsonEmptyString: gjson.New(""),
+			JsonNil:         gjson.New(nil),
+			JsonNull:        gjson.New(struct{}{}),
+		}
+
+		_, err = db.Insert(ctx, tableName, data)
+		t.AssertNil(err)
+
+		one, err := db.GetOne(ctx, fmt.Sprintf("SELECT * FROM %s WHERE id=?", tableName), 1)
+		t.AssertNil(err)
+
+		t.AssertEQ(len(one), 4)
+
+		t.Assert(one["json_empty_string"], nil)
+		t.Assert(one["json_nil"], nil)
+		t.Assert(one["json_null"], "null")
+	})
+}
+
+func Test_DB_Update_KeyFieldNameMapping(t *testing.T) {
 	table := createInitTable()
 	defer dropTable(table)
 
@@ -847,8 +893,7 @@ func Test_DB_ToJson(t *testing.T) {
 		t.Assert(users[0].CreateTime, resultJson.Get("0.create_time").String())
 
 		result = nil
-		err = result.Structs(&users)
-		t.AssertNil(err)
+		t.Assert(result.Structs(&users), sql.ErrNoRows)
 	})
 
 	gtest.C(t, func(t *gtest.T) {
@@ -1359,29 +1404,18 @@ func Test_Model_LeftJoin(t *testing.T) {
 		defer dropTable(table2)
 
 		res, err := db.Model(table2).Where("id > ?", 3).Delete()
-		if err != nil {
-			t.Fatal(err)
-		}
+		t.AssertNil(err)
 
 		n, err := res.RowsAffected()
-		if err != nil {
-			t.Fatal(err)
-		} else {
-			t.Assert(n, 7)
-		}
+		t.AssertNil(err)
+		t.Assert(n, 7)
 
 		result, err := db.Model(table1+" u1").LeftJoin(table2+" u2", "u1.id = u2.id").All()
-		if err != nil {
-			t.Fatal(err)
-		}
-
+		t.AssertNil(err)
 		t.Assert(len(result), 10)
 
 		result, err = db.Model(table1+" u1").LeftJoin(table2+" u2", "u1.id = u2.id").Where("u1.id > ? ", 2).All()
-		if err != nil {
-			t.Fatal(err)
-		}
-
+		t.AssertNil(err)
 		t.Assert(len(result), 8)
 	})
 }

@@ -1321,3 +1321,81 @@ func Test_Scan_WithDoubleSliceAttribute(t *testing.T) {
 	})
 
 }
+
+func Test_Struct_WithCustomType(t *testing.T) {
+	type PayMode int
+
+	type Req1 struct {
+		PayMode PayMode
+	}
+	type Req2 struct {
+		PayMode *PayMode
+	}
+	var (
+		params = gconv.Map(`{"PayMode": 1000}`)
+		req1   *Req1
+		req2   *Req2
+		err1   error
+		err2   error
+	)
+	err1 = gconv.Struct(params, &req1)
+	err2 = gconv.Struct(params, &req2)
+	gtest.C(t, func(t *gtest.T) {
+		t.AssertNil(err1)
+		t.Assert(req1.PayMode, 1000)
+
+		t.AssertNil(err2)
+		t.AssertNE(req2.PayMode, nil)
+		t.Assert(*req2.PayMode, 1000)
+	})
+}
+
+func Test_Struct_EmptyStruct(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		var err error
+
+		type StructA struct {
+		}
+
+		type StructB struct {
+		}
+
+		var s1 StructA
+		var s2 *StructB
+
+		err = gconv.Scan(s1, &s2)
+		t.AssertNil(err)
+
+		err = gconv.Scan(&s1, &s2)
+		t.AssertNil(err)
+
+		type StructC struct {
+			Val int `json:"val,omitempty"`
+		}
+
+		type StructD struct {
+			Val int
+		}
+
+		var s3 StructC
+		var s4 *StructD
+
+		err = gconv.Scan(s3, &s4)
+		t.AssertNil(err)
+		t.Assert(s4.Val, 0)
+
+		err = gconv.Scan(&s3, &s4)
+		t.AssertNil(err)
+		t.Assert(s4.Val, 0)
+
+		s3.Val = 123
+		err = gconv.Scan(s3, &s4)
+		t.AssertNil(err)
+		t.Assert(s4.Val, 123)
+
+		err = gconv.Scan(&s3, &s4)
+		t.AssertNil(err)
+		t.Assert(s4.Val, 123)
+
+	})
+}

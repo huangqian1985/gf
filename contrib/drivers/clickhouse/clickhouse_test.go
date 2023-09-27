@@ -263,6 +263,35 @@ func TestDriverClickhouse_InsertOne(t *testing.T) {
 	gtest.AssertNil(err)
 }
 
+func TestDriverClickhouse_InsertOneAutoDateTimeWrite(t *testing.T) {
+	connect, err := gdb.New(gdb.ConfigNode{
+		Host:      "127.0.0.1",
+		Port:      "9000",
+		User:      "default",
+		Name:      "default",
+		Type:      "clickhouse",
+		Debug:     false,
+		CreatedAt: "created",
+	})
+	gtest.AssertNil(err)
+	gtest.AssertNE(connect, nil)
+	gtest.AssertEQ(createClickhouseTableVisits(connect), nil)
+	defer dropClickhouseTableVisits(connect)
+	beforeInsertTime := time.Now()
+	_, err = connect.Model("visits").Data(g.Map{
+		"duration": float64(grand.Intn(999)),
+		"url":      gconv.String(grand.Intn(999)),
+	}).Insert()
+	gtest.AssertNil(err)
+	// Query the inserted data to get the time field value
+	data, err := connect.Model("visits").One()
+	gtest.AssertNil(err)
+	// Get the time value from the inserted data
+	createdTime := data["created"].Time()
+	// Assert the time field value is equal to or after the beforeInsertTime
+	gtest.AssertGE(createdTime.Unix(), beforeInsertTime.Unix())
+}
+
 func TestDriverClickhouse_InsertMany(t *testing.T) {
 	connect := clickhouseConfigDB()
 	gtest.AssertEQ(createClickhouseTableVisits(connect), nil)
@@ -455,9 +484,9 @@ func TestDriverClickhouse_NilTime(t *testing.T) {
 			Col9: uuid.New(),
 			Col7: []interface{}{ // Tuple(String, UInt8, Array(Map(String, String)))
 				"String Value", uint8(5), []map[string]string{
-					map[string]string{"key": "value"},
-					map[string]string{"key": "value"},
-					map[string]string{"key": "value"},
+					{"key": "value"},
+					{"key": "value"},
+					{"key": "value"},
 				}},
 			Col11: money,
 			Col12: &strMoney,
@@ -494,9 +523,9 @@ func TestDriverClickhouse_BatchInsert(t *testing.T) {
 			"Col6": []string{"Q", "W", "E", "R", "T", "Y"}, // Array(String)
 			"Col7": []interface{}{ // Tuple(String, UInt8, Array(Map(String, String)))
 				"String Value", uint8(5), []map[string]string{
-					map[string]string{"key": "value"},
-					map[string]string{"key": "value"},
-					map[string]string{"key": "value"},
+					{"key": "value"},
+					{"key": "value"},
+					{"key": "value"},
 				},
 			},
 			"Col8":  gtime.Now(),

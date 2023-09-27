@@ -100,7 +100,7 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 			if v, ok := exception.(error); ok && gerror.HasStack(v) {
 				err = v
 			} else {
-				err = gerror.NewCodeSkipf(gcode.CodeInternalError, 1, "%+v", exception)
+				err = gerror.NewCodeSkipf(gcode.CodeInternalPanic, 1, "%+v", exception)
 			}
 		}
 	}()
@@ -143,6 +143,11 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 		pointerElemReflectValue = pointerReflectValue.Elem()
 	}
 
+	// custom convert try first
+	if ok, err = callCustomConverter(paramsReflectValue, pointerReflectValue); ok {
+		return err
+	}
+
 	// If `params` and `pointer` are the same type, the do directly assignment.
 	// For performance enhancement purpose.
 	if pointerElemReflectValue.IsValid() {
@@ -179,8 +184,14 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 	// For example, if `pointer` is **User, then `elem` is *User, which is a pointer to User.
 	if pointerElemReflectValue.Kind() == reflect.Ptr {
 		if !pointerElemReflectValue.IsValid() || pointerElemReflectValue.IsNil() {
-			e := reflect.New(pointerElemReflectValue.Type().Elem()).Elem()
-			pointerElemReflectValue.Set(e.Addr())
+			e := reflect.New(pointerElemReflectValue.Type().Elem())
+			pointerElemReflectValue.Set(e)
+			defer func() {
+				if err != nil {
+					// If it is converted failed, it reset the `pointer` to nil.
+					pointerReflectValue.Elem().Set(reflect.Zero(pointerReflectValue.Type().Elem()))
+				}
+			}()
 		}
 		// if v, ok := pointerElemReflectValue.Interface().(iUnmarshalValue); ok {
 		//	return v.UnmarshalValue(params)
@@ -195,7 +206,7 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 
 	// paramsMap is the map[string]interface{} type variable for params.
 	// DO NOT use MapDeep here.
-	paramsMap := Map(paramsInterface)
+	paramsMap := doMapConvert(paramsInterface, recursiveTypeAuto, true)
 	if paramsMap == nil {
 		return gerror.NewCodef(
 			gcode.CodeInvalidParameter,
@@ -379,6 +390,11 @@ func bindVarToStructAttr(structReflectValue reflect.Value, attrName string, valu
 			return
 		}
 
+		// Try to call custom converter.
+		if ok, err := callCustomConverter(reflect.ValueOf(value), structFieldValue); ok {
+			return err
+		}
+
 		// Common interface check.
 		var ok bool
 		if err, ok = bindVarToReflectValueWithInterfaceCheck(structFieldValue, value); ok {
@@ -422,6 +438,8 @@ func bindVarToReflectValueWithInterfaceCheck(reflectValue reflect.Value, value i
 			valueBytes = b
 		} else if s, ok := value.(string); ok {
 			valueBytes = []byte(s)
+		} else if f, ok := value.(iString); ok {
+			valueBytes = []byte(f.String())
 		}
 		if len(valueBytes) > 0 {
 			return v.UnmarshalText(valueBytes), ok
@@ -434,6 +452,8 @@ func bindVarToReflectValueWithInterfaceCheck(reflectValue reflect.Value, value i
 			valueBytes = b
 		} else if s, ok := value.(string); ok {
 			valueBytes = []byte(s)
+		} else if f, ok := value.(iString); ok {
+			valueBytes = []byte(f.String())
 		}
 
 		if len(valueBytes) > 0 {
@@ -537,13 +557,28 @@ func bindVarToReflectValue(structFieldValue reflect.Value, value interface{}, ma
 				}
 			}
 		} else {
-			reflectArray = reflect.MakeSlice(structFieldValue.Type(), 1, 1)
 			var (
 				elem         reflect.Value
-				elemType     = reflectArray.Index(0).Type()
+				elemType     = structFieldValue.Type().Elem()
 				elemTypeName = elemType.Name()
 				converted    bool
 			)
+			switch reflectValue.Kind() {
+			case reflect.String:
+				// Value is empty string.
+				if reflectValue.IsZero() {
+					var elemKind = elemType.Kind()
+					// Try to find the original type kind of the slice element.
+					if elemKind == reflect.Ptr {
+						elemKind = elemType.Elem().Kind()
+					}
+					switch elemKind {
+					case reflect.String:
+						// Empty string cannot be assigned to string slice.
+						return nil
+					}
+				}
+			}
 			if elemTypeName == "" {
 				elemTypeName = elemType.String()
 			}
@@ -568,6 +603,7 @@ func bindVarToReflectValue(structFieldValue reflect.Value, value interface{}, ma
 				// Before it sets the `elem` to array, do pointer converting if necessary.
 				elem = elem.Addr()
 			}
+			reflectArray = reflect.MakeSlice(structFieldValue.Type(), 1, 1)
 			reflectArray.Index(0).Set(elem)
 		}
 		structFieldValue.Set(reflectArray)
@@ -603,7 +639,7 @@ func bindVarToReflectValue(structFieldValue reflect.Value, value interface{}, ma
 		defer func() {
 			if exception := recover(); exception != nil {
 				err = gerror.NewCodef(
-					gcode.CodeInternalError,
+					gcode.CodeInternalPanic,
 					`cannot convert value "%+v" to type "%s":%+v`,
 					value,
 					structFieldValue.Type().String(),

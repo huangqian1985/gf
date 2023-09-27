@@ -528,7 +528,7 @@ field3:
 		t.AssertNil(err)
 
 		_, err = json.Marshal(parsed)
-		t.Assert(err.Error(), "json: unsupported type: map[interface {}]interface {}")
+		t.AssertNil(err)
 
 		converted := gconv.MapDeep(parsed)
 		jsonData, err := json.Marshal(converted)
@@ -604,5 +604,19 @@ func TestMapsDeep(t *testing.T) {
 		t.Assert(len(list), 2)
 		t.Assert(list[0]["id"], 100)
 		t.Assert(list[1]["id"], 200)
+	})
+}
+
+func TestMapWithJsonOmitEmpty(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		type S struct {
+			Key   string      `json:",omitempty"`
+			Value interface{} `json:",omitempty"`
+		}
+		s := S{
+			Key:   "",
+			Value: 1,
+		}
+		t.Assert(gconv.Map(s), g.Map{"Value": 1})
 	})
 }
