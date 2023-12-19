@@ -8,6 +8,8 @@ package gclient
 
 import (
 	"time"
+
+	"github.com/gogf/gf/v2/net/gsvc"
 )
 
 // Prefix is a chaining function,
@@ -34,6 +36,14 @@ func (c *Client) Header(m map[string]string) *Client {
 func (c *Client) HeaderRaw(headers string) *Client {
 	newClient := c.Clone()
 	newClient.SetHeaderRaw(headers)
+	return newClient
+}
+
+// Discovery is a chaining function, which sets the discovery for client.
+// You can use `Discovery(nil)` to disable discovery feature for current client.
+func (c *Client) Discovery(discovery gsvc.Discovery) *Client {
+	newClient := c.Clone()
+	newClient.SetDiscovery(discovery)
 	return newClient
 }
 
@@ -113,5 +123,12 @@ func (c *Client) Proxy(proxyURL string) *Client {
 func (c *Client) RedirectLimit(redirectLimit int) *Client {
 	newClient := c.Clone()
 	newClient.SetRedirectLimit(redirectLimit)
+	return newClient
+}
+
+// NoUrlEncode sets the mark that do not encode the parameters before sending request.
+func (c *Client) NoUrlEncode() *Client {
+	newClient := c.Clone()
+	newClient.SetNoUrlEncode(true)
 	return newClient
 }

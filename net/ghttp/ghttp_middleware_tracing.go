@@ -7,9 +7,12 @@
 package ghttp
 
 import (
+	"compress/gzip"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"net/http"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -18,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/gogf/gf/v2"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/internal/httputil"
 	"github.com/gogf/gf/v2/internal/utils"
 	"github.com/gogf/gf/v2/net/gtrace"
@@ -35,6 +39,7 @@ const (
 	tracingEventHttpResponse                    = "http.response"
 	tracingEventHttpResponseHeaders             = "http.response.headers"
 	tracingEventHttpResponseBody                = "http.response.body"
+	tracingEventHttpRequestUrl                  = "http.request.url"
 	tracingMiddlewareHandled        gctx.StrKey = `MiddlewareServerTracingHandled`
 )
 
@@ -63,7 +68,7 @@ func internalMiddlewareServerTracing(r *Request) {
 			ctx,
 			propagation.HeaderCarrier(r.Header),
 		),
-		r.URL.String(),
+		r.URL.Path,
 		trace.WithSpanKind(trace.SpanKindServer),
 	)
 	defer span.End()
@@ -80,10 +85,16 @@ func internalMiddlewareServerTracing(r *Request) {
 	}
 
 	// Request content logging.
-	reqBodyContentBytes, _ := ioutil.ReadAll(r.Body)
+	reqBodyContentBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		r.SetError(gerror.Wrap(err, `read request body failed`))
+		span.SetStatus(codes.Error, fmt.Sprintf(`%+v`, err))
+		return
+	}
 	r.Body = utils.NewReadCloser(reqBodyContentBytes, false)
 
 	span.AddEvent(tracingEventHttpRequest, trace.WithAttributes(
+		attribute.String(tracingEventHttpRequestUrl, r.URL.String()),
 		attribute.String(tracingEventHttpRequestHeaders, gconv.String(httputil.HeaderToMap(r.Header))),
 		attribute.String(tracingEventHttpRequestBaggage, gtrace.GetBaggageMap(ctx).String()),
 		attribute.String(tracingEventHttpRequestBody, gstr.StrLimit(
@@ -97,14 +108,39 @@ func internalMiddlewareServerTracing(r *Request) {
 	r.Middleware.Next()
 
 	// Error logging.
-	if err := r.GetError(); err != nil {
+	if err = r.GetError(); err != nil {
 		span.SetStatus(codes.Error, fmt.Sprintf(`%+v`, err))
 	}
 	// Response content logging.
 	var resBodyContent = gstr.StrLimit(r.Response.BufferString(), gtrace.MaxContentLogSize(), "...")
+	if gzipAccepted(r.Response.Header()) {
+		reader, err := gzip.NewReader(strings.NewReader(r.Response.BufferString()))
+		if err != nil {
+			span.SetStatus(codes.Error, fmt.Sprintf(`read gzip response err:%+v`, err))
+		}
+		defer reader.Close()
+		uncompressed, err := io.ReadAll(reader)
+		if err != nil {
+			span.SetStatus(codes.Error, fmt.Sprintf(`get uncompress value err:%+v`, err))
+		}
+		resBodyContent = gstr.StrLimit(string(uncompressed), gtrace.MaxContentLogSize(), "...")
+	}
 
 	span.AddEvent(tracingEventHttpResponse, trace.WithAttributes(
 		attribute.String(tracingEventHttpResponseHeaders, gconv.String(httputil.HeaderToMap(r.Response.Header()))),
 		attribute.String(tracingEventHttpResponseBody, resBodyContent),
 	))
+}
+
+// gzipAccepted returns whether the client will accept gzip-encoded content.
+func gzipAccepted(header http.Header) bool {
+	a := header.Get("Content-Encoding")
+	parts := strings.Split(a, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "gzip" || strings.HasPrefix(part, "gzip;") {
+			return true
+		}
+	}
+	return false
 }

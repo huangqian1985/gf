@@ -2778,7 +2778,7 @@ func Test_Model_Cache(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(n, 1)
 
-		err = db.Transaction(context.TODO(), func(ctx context.Context, tx *gdb.TX) error {
+		err = db.Transaction(context.TODO(), func(ctx context.Context, tx gdb.TX) error {
 			one, err := tx.Model(table).Cache(gdb.CacheOption{
 				Duration: time.Second,
 				Name:     "test3",
@@ -2818,7 +2818,7 @@ func Test_Model_Cache(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(n, 1)
 
-		err = db.Transaction(context.TODO(), func(ctx context.Context, tx *gdb.TX) error {
+		err = db.Transaction(context.TODO(), func(ctx context.Context, tx gdb.TX) error {
 			// Cache feature disabled.
 			one, err := tx.Model(table).Cache(gdb.CacheOption{
 				Duration: time.Second,
@@ -3097,12 +3097,14 @@ func Test_Model_HasTable(t *testing.T) {
 	defer dropTable(table)
 
 	gtest.C(t, func(t *gtest.T) {
+		t.AssertNil(db.GetCore().ClearCacheAll(ctx))
 		result, err := db.GetCore().HasTable(table)
 		t.Assert(result, true)
 		t.AssertNil(err)
 	})
 
 	gtest.C(t, func(t *gtest.T) {
+		t.AssertNil(db.GetCore().ClearCacheAll(ctx))
 		result, err := db.GetCore().HasTable("table12321")
 		t.Assert(result, false)
 		t.AssertNil(err)
@@ -3134,9 +3136,9 @@ func createTableForTimeZoneTest() string {
 	        passport    varchar(45) NULL,
 	        password    char(32) NULL,
 	        nickname    varchar(45) NULL,
-	        created_at timestamp NULL,
- 			updated_at timestamp NULL,
-			deleted_at timestamp NULL,
+	        created_at timestamp(6) NULL,
+ 			updated_at timestamp(6) NULL,
+			deleted_at timestamp(6) NULL,
 	        PRIMARY KEY (id)
 	    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 	    `, tableName,
@@ -3849,7 +3851,7 @@ func Test_Model_FieldCount(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["id"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -3862,7 +3864,7 @@ func Test_Model_FieldMax(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["id"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -3875,7 +3877,7 @@ func Test_Model_FieldMin(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["id"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -3888,7 +3890,7 @@ func Test_Model_FieldAvg(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["id"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -4118,7 +4120,7 @@ func Test_Model_Embedded_Filter(t *testing.T) {
 //			Password       string
 //			Nickname       string
 //			CreateTime     string
-//			NoneExistFiled string
+//			NoneExistField string
 //		}
 //		data := User{
 //			Id:         1,
@@ -4663,5 +4665,87 @@ func Test_Builder_OmitEmptyWhere(t *testing.T) {
 		).Count()
 		t.AssertNil(err)
 		t.Assert(count, int64(TableSize))
+	})
+}
+
+func Test_Scan_Nil_Result_Error(t *testing.T) {
+	table := createInitTable()
+	defer dropTable(table)
+
+	type S struct {
+		Id    int
+		Name  string
+		Age   int
+		Score int
+	}
+	gtest.C(t, func(t *gtest.T) {
+		var s *S
+		err := db.Model(table).Where("id", 1).Scan(&s)
+		t.AssertNil(err)
+		t.Assert(s.Id, 1)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		var s *S
+		err := db.Model(table).Where("id", 100).Scan(&s)
+		t.AssertNil(err)
+		t.Assert(s, nil)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		var s S
+		err := db.Model(table).Where("id", 100).Scan(&s)
+		t.Assert(err, sql.ErrNoRows)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		var ss []*S
+		err := db.Model(table).Scan(&ss)
+		t.AssertNil(err)
+		t.Assert(len(ss), TableSize)
+	})
+	// If the result is empty, it returns error.
+	gtest.C(t, func(t *gtest.T) {
+		var ss = make([]*S, 10)
+		err := db.Model(table).WhereGT("id", 100).Scan(&ss)
+		t.Assert(err, sql.ErrNoRows)
+	})
+}
+
+func Test_Model_FixGdbJoin(t *testing.T) {
+	array := gstr.SplitAndTrim(gtest.DataContent(`fix_gdb_join.sql`), ";")
+	for _, v := range array {
+		if _, err := db.Exec(ctx, v); err != nil {
+			gtest.Error(err)
+		}
+	}
+	defer dropTable(`common_resource`)
+	defer dropTable(`managed_resource`)
+	defer dropTable(`rules_template`)
+	defer dropTable(`resource_mark`)
+	gtest.C(t, func(t *gtest.T) {
+		t.AssertNil(db.GetCore().ClearCacheAll(ctx))
+		sqlSlice, err := gdb.CatchSQL(ctx, func(ctx context.Context) error {
+			orm := db.Model(`managed_resource`).Ctx(ctx).
+				LeftJoinOnField(`common_resource`, `resource_id`).
+				LeftJoinOnFields(`resource_mark`, `resource_mark_id`, `=`, `id`).
+				LeftJoinOnFields(`rules_template`, `rule_template_id`, `=`, `template_id`).
+				FieldsPrefix(
+					`managed_resource`,
+					"resource_id", "user", "status", "status_message", "safe_publication", "rule_template_id",
+					"created_at", "comments", "expired_at", "resource_mark_id", "instance_id", "resource_name",
+					"pay_mode").
+				FieldsPrefix(`resource_mark`, "mark_name", "color").
+				FieldsPrefix(`rules_template`, "name").
+				FieldsPrefix(`common_resource`, `src_instance_id`, "database_kind", "source_type", "ip", "port")
+			all, err := orm.OrderAsc("src_instance_id").All()
+			t.Assert(len(all), 4)
+			t.Assert(all[0]["pay_mode"], 1)
+			t.Assert(all[0]["src_instance_id"], 2)
+			t.Assert(all[3]["instance_id"], "dmcins-jxy0x75m")
+			t.Assert(all[3]["src_instance_id"], "vdb-6b6m3u1u")
+			t.Assert(all[3]["resource_mark_id"], "11")
+			return err
+		})
+		t.AssertNil(err)
+
+		t.Assert(gtest.DataContent(`fix_gdb_join_expect.sql`), sqlSlice[len(sqlSlice)-1])
 	})
 }

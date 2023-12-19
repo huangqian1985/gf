@@ -27,6 +27,12 @@ type RuleFuncInput struct {
 	// Message specifies the custom error message or configured i18n message for this rule.
 	Message string
 
+	// Field specifies the field for this rule to validate.
+	Field string
+
+	// ValueType specifies the type of the value, which might be nil.
+	ValueType reflect.Type
+
 	// Value specifies the value for this rule to validate.
 	Value *gvar.Var
 

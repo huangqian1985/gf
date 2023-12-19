@@ -8,6 +8,7 @@ package sqlite_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -27,6 +28,27 @@ func Test_New(t *testing.T) {
 		node := gdb.ConfigNode{
 			Type:    "sqlite",
 			Link:    gfile.Join(dbDir, "test.db"),
+			Charset: "utf8",
+		}
+		newDb, err := gdb.New(node)
+		t.AssertNil(err)
+		value, err := newDb.GetValue(ctx, `select 1`)
+		t.AssertNil(err)
+		t.Assert(value, `1`)
+		t.AssertNil(newDb.Close(ctx))
+	})
+}
+
+func Test_New_Path_With_Colon(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+
+		dbFilePathWithColon := gfile.Join(dbDir, "test:1")
+		if err := gfile.Mkdir(dbFilePathWithColon); err != nil {
+			gtest.Error(err)
+		}
+		node := gdb.ConfigNode{
+			Type:    "sqlite",
+			Link:    fmt.Sprintf(`sqlite::@file(%s)`, gfile.Join(dbFilePathWithColon, "test.db")),
 			Charset: "utf8",
 		}
 		newDb, err := gdb.New(node)
@@ -250,7 +272,7 @@ func Test_DB_Insert_KeyFieldNameMapping(t *testing.T) {
 	})
 }
 
-func Test_DB_Upadte_KeyFieldNameMapping(t *testing.T) {
+func Test_DB_Update_KeyFieldNameMapping(t *testing.T) {
 	table := createInitTable()
 	defer dropTable(table)
 
@@ -818,8 +840,7 @@ func Test_DB_ToJson(t *testing.T) {
 		t.Assert(users[0].CreateTime, resultJson.Get("0.create_time").String())
 
 		result = nil
-		err = result.Structs(&users)
-		t.AssertNil(err)
+		t.Assert(result.Structs(&users), sql.ErrNoRows)
 	})
 
 	gtest.C(t, func(t *gtest.T) {
@@ -1548,5 +1569,41 @@ func Test_TableFields(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		_, err := db.TableFields(context.Background(), "t1 t2")
 		gtest.AssertNE(err, nil)
+	})
+}
+
+func Test_TableNameIsKeyword(t *testing.T) {
+	table := createInitTable(TableNameWhichIsKeyword)
+	defer dropTable(table)
+	_, err := db.Update(ctx, table, "create_time='2010-10-10 00:00:01'", "id=?", 1)
+	gtest.AssertNil(err)
+
+	gtest.C(t, func(t *gtest.T) {
+		id := 1
+		result, err := db.Model(table).Fields("*").Where("id = ?", id).All()
+		if err != nil {
+			gtest.Fatal(err)
+		}
+
+		type t_user struct {
+			Id         int
+			Passport   string
+			Password   string
+			NickName   string
+			CreateTime string
+		}
+
+		t_users := make([]t_user, 0)
+		err = result.Structs(&t_users)
+		if err != nil {
+			gtest.Fatal(err)
+		}
+
+		resultIntMap := result.MapKeyInt("id")
+		t.Assert(t_users[0].Id, resultIntMap[id]["id"])
+		t.Assert(t_users[0].Passport, resultIntMap[id]["passport"])
+		t.Assert(t_users[0].Password, resultIntMap[id]["password"])
+		t.Assert(t_users[0].NickName, resultIntMap[id]["nickname"])
+		t.Assert(t_users[0].CreateTime, resultIntMap[id]["create_time"])
 	})
 }

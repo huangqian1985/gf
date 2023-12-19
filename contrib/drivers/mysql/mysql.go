@@ -12,8 +12,10 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -26,6 +28,10 @@ import (
 type Driver struct {
 	*gdb.Core
 }
+
+const (
+	quoteChar = "`"
+)
 
 func init() {
 	var (
@@ -71,12 +77,16 @@ func (d *Driver) Open(config *gdb.ConfigNode) (db *sql.DB, err error) {
 			source, _ = gregex.ReplaceString(`/([\w\.\-]+)+`, "/"+config.Name, source)
 		}
 	} else {
+		// TODO: Do not set charset when charset is not specified (in v2.5.0)
 		source = fmt.Sprintf(
 			"%s:%s@%s(%s:%s)/%s?charset=%s",
 			config.User, config.Pass, config.Protocol, config.Host, config.Port, config.Name, config.Charset,
 		)
 		if config.Timezone != "" {
-			source = fmt.Sprintf("%s&loc=%s", source, url.QueryEscape(config.Timezone))
+			if strings.Contains(config.Timezone, "/") {
+				config.Timezone = url.QueryEscape(config.Timezone)
+			}
+			source = fmt.Sprintf("%s&loc=%s", source, config.Timezone)
 		}
 		if config.Extra != "" {
 			source = fmt.Sprintf("%s&%s", source, config.Extra)
@@ -94,7 +104,7 @@ func (d *Driver) Open(config *gdb.ConfigNode) (db *sql.DB, err error) {
 
 // GetChars returns the security char for this type of database.
 func (d *Driver) GetChars() (charLeft string, charRight string) {
-	return "`", "`"
+	return quoteChar, quoteChar
 }
 
 // DoFilter handles the sql before posts it to database.
@@ -134,15 +144,13 @@ func (d *Driver) Tables(ctx context.Context, schema ...string) (tables []string,
 //
 // It's using cache feature to enhance the performance, which is never expired util the
 // process restarts.
-func (d *Driver) TableFields(
-	ctx context.Context, table string, schema ...string,
-) (fields map[string]*gdb.TableField, err error) {
+func (d *Driver) TableFields(ctx context.Context, table string, schema ...string) (fields map[string]*gdb.TableField, err error) {
 	var (
-		result    gdb.Result
-		link      gdb.Link
-		useSchema = gutil.GetOrDefaultStr(d.GetSchema(), schema...)
+		result     gdb.Result
+		link       gdb.Link
+		usedSchema = gutil.GetOrDefaultStr(d.GetSchema(), schema...)
 	)
-	if link, err = d.SlaveLink(useSchema); err != nil {
+	if link, err = d.SlaveLink(usedSchema); err != nil {
 		return nil, err
 	}
 	result, err = d.DoSelect(

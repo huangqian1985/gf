@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogf/gf/v2/util/gconv"
+
 	"github.com/gogf/gf/v2/container/garray"
 	"github.com/gogf/gf/v2/container/gmap"
 	"github.com/gogf/gf/v2/database/gdb"
@@ -25,7 +27,7 @@ import (
 func TestPage(t *testing.T) {
 	table := createInitTable()
 	defer dropTable(table)
-	db.SetDebug(true)
+	//db.SetDebug(true)
 	result, err := db.Model(table).Page(1, 2).Order("id").All()
 	gtest.Assert(err, nil)
 	fmt.Println("page:1--------", result)
@@ -466,7 +468,7 @@ func Test_Model_Array(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		all, err := db.Model(table).Where("id", g.Slice{1, 2, 3}).All()
 		t.AssertNil(err)
-		t.Assert(all.Array("ID"), g.Slice{1, 2, 3})
+		t.Assert(gconv.Ints(all.Array("ID")), g.Slice{1, 2, 3})
 		t.Assert(all.Array("NICKNAME"), g.Slice{"name_1", "name_2", "name_3"})
 	})
 	gtest.C(t, func(t *gtest.T) {
@@ -1556,15 +1558,15 @@ func Test_Model_Option_Map(t *testing.T) {
 		t.Assert(n, 1)
 
 		_, err = db.Model(table).OmitEmptyData().Data(g.Map{"nickname": ""}).Where("id", 2).Update()
-		t.AssertNE(err, nil)
+		t.AssertNil(err)
 
 		r, err = db.Model(table).OmitEmpty().Data(g.Map{"nickname": "", "password": "123"}).Where("id", 3).Update()
 		t.AssertNil(err)
 		n, _ = r.RowsAffected()
 		t.Assert(n, 1)
 
-		_, err = db.Model(table).OmitEmpty().Fields("nickname").Data(g.Map{"nickname": "", "password": "123"}).Where("id", 4).Update()
-		t.AssertNE(err, nil)
+		_, err = db.Model(table).OmitEmpty().Fields("nickname", "password").Data(g.Map{"nickname": "", "password": "123", "passport": "123"}).Where("id", 4).Update()
+		t.AssertNil(err)
 
 		r, err = db.Model(table).OmitEmpty().
 			Fields("password").Data(g.Map{
@@ -1639,7 +1641,7 @@ func Test_Model_FieldsEx(t *testing.T) {
 	defer dropTable(table)
 	// Select.
 	gtest.C(t, func(t *gtest.T) {
-		r, err := db.Model(table).FieldsEx("create_time, id").Where("id in (?)", g.Slice{1, 2}).Order("id asc").All()
+		r, err := db.Model(table).FieldsEx("create_time, created_at, updated_at, id").Where("id in (?)", g.Slice{1, 2}).Order("id asc").All()
 		t.AssertNil(err)
 		t.Assert(len(r), 2)
 		t.Assert(len(r[0]), 3)
@@ -1905,12 +1907,14 @@ func Test_Model_HasTable(t *testing.T) {
 	defer dropTable(table)
 
 	gtest.C(t, func(t *gtest.T) {
+		t.AssertNil(db.GetCore().ClearCacheAll(ctx))
 		result, err := db.GetCore().HasTable(table)
 		t.Assert(result, true)
 		t.AssertNil(err)
 	})
 
 	gtest.C(t, func(t *gtest.T) {
+		t.AssertNil(db.GetCore().ClearCacheAll(ctx))
 		result, err := db.GetCore().HasTable("table12321")
 		t.Assert(result, false)
 		t.AssertNil(err)
@@ -2347,7 +2351,7 @@ func Test_Model_FieldCount(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["ID"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -2360,7 +2364,7 @@ func Test_Model_FieldMax(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["ID"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -2373,7 +2377,7 @@ func Test_Model_FieldMin(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["ID"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -2386,7 +2390,7 @@ func Test_Model_FieldAvg(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(all), TableSize)
 		t.Assert(all[0]["ID"], 1)
-		t.Assert(all[0]["total"], 1)
+		t.Assert(all[0]["total"].Int(), 1)
 	})
 }
 
@@ -2545,5 +2549,42 @@ func Test_Model_WherePrefixLike(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(len(r), 1)
 		t.Assert(r[0]["ID"], "3")
+	})
+}
+
+func Test_Model_AllAndCount(t *testing.T) {
+	table := createInitTable()
+	defer dropTable(table)
+
+	gtest.C(t, func(t *gtest.T) {
+		result, total, err := db.Model(table).Order("id").Limit(0, 3).AllAndCount(false)
+		t.Assert(err, nil)
+
+		t.Assert(len(result), 3)
+		t.Assert(total, TableSize)
+	})
+}
+
+func Test_Model_ScanAndCount(t *testing.T) {
+	table := createInitTable()
+	defer dropTable(table)
+
+	gtest.C(t, func(t *gtest.T) {
+		type User struct {
+			Id         int
+			Passport   string
+			Password   string
+			NickName   string
+			CreateTime gtime.Time
+		}
+
+		users := make([]User, 0)
+		total := 0
+
+		err := db.Model(table).Order("id").Limit(0, 3).ScanAndCount(&users, &total, false)
+		t.Assert(err, nil)
+
+		t.Assert(len(users), 3)
+		t.Assert(total, TableSize)
 	})
 }

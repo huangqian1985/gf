@@ -1,3 +1,9 @@
+// Copyright GoFrame gf Author(https://goframe.org). All Rights Reserved.
+//
+// This Source Code Form is subject to the terms of the MIT License.
+// If a copy of the MIT was not distributed with this file,
+// You can obtain one at https://github.com/gogf/gf.
+
 package cmd
 
 import (
@@ -11,6 +17,7 @@ import (
 
 	"github.com/gogf/gf/v2/encoding/gbase64"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gbuild"
 	"github.com/gogf/gf/v2/os/gcmd"
 	"github.com/gogf/gf/v2/os/genv"
 	"github.com/gogf/gf/v2/os/gfile"
@@ -40,7 +47,7 @@ const (
 	cBuildBrief = `cross-building go project for lots of platforms`
 	cBuildEg    = `
 gf build main.go
-gf build main.go --pack public,template
+gf build main.go --ps public,template
 gf build main.go --cgo
 gf build main.go -m none 
 gf build main.go -n my-app -a all -s all
@@ -123,15 +130,21 @@ type cBuildInput struct {
 	VarMap        g.Map  `short:"r"  name:"varMap"  brief:"custom built embedded variable into binary"`
 	PackSrc       string `short:"ps" name:"packSrc" brief:"pack one or more folders into one go file before building"`
 	PackDst       string `short:"pd" name:"packDst" brief:"temporary go file path for pack, this go file will be automatically removed after built" d:"internal/packed/build_pack_data.go"`
-	ExitWhenError bool   `short:"ew" name:"exitWhenError" brief:"exit building when any error occurs, default is false" orphan:"true"`
+	ExitWhenError bool   `short:"ew" name:"exitWhenError" brief:"exit building when any error occurs, specially for multiple arch and system buildings. default is false" orphan:"true"`
+	DumpENV       bool   `short:"de" name:"dumpEnv" brief:"dump current go build environment before building binary" orphan:"true"`
 }
 
 type cBuildOutput struct{}
 
 func (c cBuild) Index(ctx context.Context, in cBuildInput) (out *cBuildOutput, err error) {
+	// print used go env
+	if in.DumpENV {
+		_, _ = Env.Index(ctx, cEnvInput{})
+	}
+
 	mlog.SetHeaderPrint(true)
 
-	mlog.Debugf(`build input: %+v`, in)
+	mlog.Debugf(`build command input: %+v`, in)
 	// Necessary check.
 	if gproc.SearchBinary("go") == "" {
 		mlog.Fatalf(`command "go" not found in your environment, please install golang first to proceed this command`)
@@ -146,7 +159,7 @@ func (c cBuild) Index(ctx context.Context, in cBuildInput) (out *cBuildOutput, e
 		if gfile.Exists("main.go") {
 			file = "main.go"
 		} else {
-			mlog.Fatal("build file path cannot be empty")
+			mlog.Fatal("build file path is empty or main.go not found in current working directory")
 		}
 	}
 	if in.Name == "" {
@@ -236,22 +249,28 @@ func (c cBuild) Index(ctx context.Context, in cBuildInput) (out *cBuildOutput, e
 		if len(customSystems) > 0 && customSystems[0] != "all" && !gstr.InArray(customSystems, system) {
 			continue
 		}
-		for arch, _ := range item {
+		for arch := range item {
 			if len(customArches) > 0 && customArches[0] != "all" && !gstr.InArray(customArches, arch) {
 				continue
 			}
 			if len(customSystems) == 0 && len(customArches) == 0 {
+				// Single binary building, output the binary to current working folder.
+				// For example:
+				// `gf build`
+				// `gf build -o main.exe`
 				if runtime.GOOS == "windows" {
 					ext = ".exe"
 				}
-				// Single binary building, output the binary to current working folder.
-				output := ""
+				var outputPath string
 				if len(in.Output) > 0 {
-					output = "-o " + in.Output + ext
+					outputPath = "-o " + in.Output
 				} else {
-					output = "-o " + in.Name + ext
+					outputPath = "-o " + in.Name + ext
 				}
-				cmd = fmt.Sprintf(`go build %s -ldflags "%s" %s %s`, output, ldFlags, in.Extra, file)
+				cmd = fmt.Sprintf(
+					`go build %s -ldflags "%s" %s %s`,
+					outputPath, ldFlags, in.Extra, file,
+				)
 			} else {
 				// Cross-building, output the compiled binary to specified path.
 				if system == "windows" {
@@ -259,11 +278,22 @@ func (c cBuild) Index(ctx context.Context, in cBuildInput) (out *cBuildOutput, e
 				}
 				genv.MustSet("GOOS", system)
 				genv.MustSet("GOARCH", arch)
+
+				var outputPath string
+				if len(in.Output) > 0 {
+					outputPath = "-o " + in.Output
+				} else {
+					outputPath = fmt.Sprintf(
+						"-o %s/%s/%s%s",
+						in.Path, system+"_"+arch, in.Name, ext,
+					)
+				}
 				cmd = fmt.Sprintf(
-					`go build -o %s/%s/%s%s -ldflags "%s" %s%s`,
-					in.Path, system+"_"+arch, in.Name, ext, ldFlags, in.Extra, file,
+					`go build %s -ldflags "%s" %s%s`,
+					outputPath, ldFlags, in.Extra, file,
 				)
 			}
+			mlog.Debug(fmt.Sprintf("build for GOOS=%s GOARCH=%s", system, arch))
 			mlog.Debug(cmd)
 			// It's not necessary printing the complete command string.
 			cmdShow, _ := gregex.ReplaceString(`\s+(-ldflags ".+?")\s+`, " ", cmd)
@@ -292,15 +322,16 @@ buildDone:
 	return
 }
 
-// getBuildInVarMapJson retrieves and returns the custom build-in variables in configuration
+// getBuildInVarStr retrieves and returns the custom build-in variables in configuration
 // file as json.
 func (c cBuild) getBuildInVarStr(ctx context.Context, in cBuildInput) string {
 	buildInVarMap := in.VarMap
 	if buildInVarMap == nil {
 		buildInVarMap = make(g.Map)
 	}
-	buildInVarMap["builtGit"] = c.getGitCommit(ctx)
-	buildInVarMap["builtTime"] = gtime.Now().String()
+	buildInVarMap[gbuild.BuiltGit] = c.getGitCommit(ctx)
+	buildInVarMap[gbuild.BuiltTime] = gtime.Now().String()
+	buildInVarMap[gbuild.BuiltVersion] = in.Version
 	b, err := json.Marshal(buildInVarMap)
 	if err != nil {
 		mlog.Fatal(err)

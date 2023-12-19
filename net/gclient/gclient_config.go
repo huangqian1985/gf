@@ -20,6 +20,8 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/internal/intlog"
+	"github.com/gogf/gf/v2/net/gsel"
+	"github.com/gogf/gf/v2/net/gsvc"
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
 )
@@ -123,6 +125,12 @@ func (c *Client) SetRedirectLimit(redirectLimit int) *Client {
 	return c
 }
 
+// SetNoUrlEncode sets the mark that do not encode the parameters before sending request.
+func (c *Client) SetNoUrlEncode(noUrlEncode bool) *Client {
+	c.noUrlEncode = noUrlEncode
+	return c
+}
+
 // SetProxy set proxy for the client.
 // This func will do nothing when the parameter `proxyURL` is empty or in wrong pattern.
 // The correct pattern is like `http://USER:PASSWORD@IP:PORT` or `socks5://USER:PASSWORD@IP:PORT`.
@@ -196,4 +204,14 @@ func (c *Client) SetTLSConfig(tlsConfig *tls.Config) error {
 		return nil
 	}
 	return gerror.New(`cannot set TLSClientConfig for custom Transport of the client`)
+}
+
+// SetBuilder sets the load balance builder for client.
+func (c *Client) SetBuilder(builder gsel.Builder) {
+	c.builder = builder
+}
+
+// SetDiscovery sets the load balance builder for client.
+func (c *Client) SetDiscovery(discovery gsvc.Discovery) {
+	c.discovery = discovery
 }

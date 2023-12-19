@@ -52,8 +52,19 @@ func (m *Model) getModel() *Model {
 // Eg:
 // ID        -> id
 // NICK_Name -> nickname.
-func (m *Model) mappingAndFilterToTableFields(fields []string, filter bool) []string {
-	fieldsMap, _ := m.TableFields(m.tablesInit)
+func (m *Model) mappingAndFilterToTableFields(table string, fields []string, filter bool) []string {
+	var fieldsTable = table
+	if fieldsTable != "" {
+		hasTable, _ := m.db.GetCore().HasTable(fieldsTable)
+		if !hasTable {
+			fieldsTable = m.tablesInit
+		}
+	}
+	if fieldsTable == "" {
+		fieldsTable = m.tablesInit
+	}
+
+	fieldsMap, _ := m.TableFields(fieldsTable)
 	if len(fieldsMap) == 0 {
 		return fields
 	}
@@ -194,7 +205,7 @@ func (m *Model) doMappingAndFilterForInsertOrUpdateDataMap(data Map, allowOmitEm
 // The parameter `master` specifies whether using the master node if master-slave configured.
 func (m *Model) getLink(master bool) Link {
 	if m.tx != nil {
-		return &txLink{m.tx.tx}
+		return &txLink{m.tx.GetSqlTX()}
 	}
 	linkType := m.linkType
 	if linkType == 0 {

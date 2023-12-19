@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/gogf/gf/v2/internal/intlog"
+
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/internal/reflection"
@@ -46,28 +48,30 @@ func (m *Model) Update(dataAndWhere ...interface{}) (result sql.Result, err erro
 	var (
 		updateData                                    = m.data
 		reflectInfo                                   = reflection.OriginTypeAndKind(updateData)
-		fieldNameUpdate                               = m.getSoftFieldNameUpdated()
+		fieldNameUpdate                               = m.getSoftFieldNameUpdated("", m.tablesInit)
 		conditionWhere, conditionExtra, conditionArgs = m.formatCondition(ctx, false, false)
+		conditionStr                                  = conditionWhere + conditionExtra
 	)
+	if m.unscoped {
+		fieldNameUpdate = ""
+	}
+
 	switch reflectInfo.OriginKind {
 	case reflect.Map, reflect.Struct:
-		var dataMap map[string]interface{}
-		dataMap, err = m.db.ConvertDataForRecord(ctx, m.data)
-		if err != nil {
-			return nil, err
-		}
+		var dataMap = anyValueToMapBeforeToRecord(m.data)
 		// Automatically update the record updating time.
-		if !m.unscoped && fieldNameUpdate != "" {
-			dataMap[fieldNameUpdate] = gtime.Now().String()
+		if fieldNameUpdate != "" {
+			dataMap[fieldNameUpdate] = gtime.Now()
 		}
 		updateData = dataMap
 
 	default:
 		updates := gconv.String(m.data)
 		// Automatically update the record updating time.
-		if !m.unscoped && fieldNameUpdate != "" {
+		if fieldNameUpdate != "" {
 			if fieldNameUpdate != "" && !gstr.Contains(updates, fieldNameUpdate) {
-				updates += fmt.Sprintf(`,%s='%s'`, fieldNameUpdate, gtime.Now().String())
+				updates += fmt.Sprintf(`,%s=?`, fieldNameUpdate)
+				conditionArgs = append([]interface{}{gtime.Now()}, conditionArgs...)
 			}
 		}
 		updateData = updates
@@ -76,9 +80,17 @@ func (m *Model) Update(dataAndWhere ...interface{}) (result sql.Result, err erro
 	if err != nil {
 		return nil, err
 	}
-	conditionStr := conditionWhere + conditionExtra
+
 	if !gstr.ContainsI(conditionStr, " WHERE ") {
-		return nil, gerror.NewCode(gcode.CodeMissingParameter, "there should be WHERE condition statement for UPDATE operation")
+		intlog.Printf(
+			ctx,
+			`sql condition string "%s" has no WHERE for UPDATE operation, fieldNameUpdate: %s`,
+			conditionStr, fieldNameUpdate,
+		)
+		return nil, gerror.NewCode(
+			gcode.CodeMissingParameter,
+			"there should be WHERE condition statement for UPDATE operation",
+		)
 	}
 
 	in := &HookUpdateInput{

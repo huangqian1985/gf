@@ -11,6 +11,7 @@ import (
 	"reflect"
 
 	"github.com/gogf/gf/v2/container/garray"
+	"github.com/gogf/gf/v2/container/gmap"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/internal/json"
@@ -21,6 +22,7 @@ import (
 	"github.com/gogf/gf/v2/util/gtag"
 )
 
+// Path is specified by OpenAPI/Swagger standard version 3.0.
 type Path struct {
 	Ref         string      `json:"$ref,omitempty"`
 	Summary     string      `json:"summary,omitempty"`
@@ -58,9 +60,7 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 		oai.Paths = map[string]Path{}
 	}
 
-	var (
-		reflectType = reflect.TypeOf(in.Function)
-	)
+	var reflectType = reflect.TypeOf(in.Function)
 	if reflectType.NumIn() != 2 || reflectType.NumOut() != 2 {
 		return gerror.NewCodef(
 			gcode.CodeInvalidParameter,
@@ -96,6 +96,7 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 			Responses:   map[string]ResponseRef{},
 			XExtensions: make(XExtensions),
 		}
+		seRequirement = SecurityRequirement{}
 	)
 	// Path check.
 	if in.Path == "" {
@@ -133,9 +134,21 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 	}
 
 	if len(inputMetaMap) > 0 {
-		if err := oai.tagMapToPath(inputMetaMap, &path); err != nil {
+		// Path and Operation are not the same thing, so it is necessary to copy a Meta for Path from Operation and edit it.
+		// And you know, we set the Summary and Description for Operation, not for Path, so we need to remove them.
+		inputMetaMapForPath := gmap.NewStrStrMapFrom(inputMetaMap).Clone()
+		inputMetaMapForPath.Removes([]string{
+			gtag.SummaryShort,
+			gtag.SummaryShort2,
+			gtag.Summary,
+			gtag.DescriptionShort,
+			gtag.DescriptionShort2,
+			gtag.Description,
+		})
+		if err := oai.tagMapToPath(inputMetaMapForPath.Map(), &path); err != nil {
 			return err
 		}
+
 		if err := oai.tagMapToOperation(inputMetaMap, &operation); err != nil {
 			return err
 		}
@@ -143,6 +156,18 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 		if mime = inputMetaMap[gtag.Mime]; mime == "" {
 			mime = inputMetaMap[gtag.Consumes]
 		}
+	}
+
+	// path security
+	// note: the security schema type only support http and apiKey;not support oauth2 and openIdConnect.
+	// multi schema separate with comma, e.g. `security: apiKey1,apiKey2`
+	TagNameSecurity := gmeta.Get(inputObject.Interface(), gtag.Security).String()
+	securities := gstr.SplitAndTrim(TagNameSecurity, ",")
+	for _, sec := range securities {
+		seRequirement[sec] = []string{}
+	}
+	if len(securities) > 0 {
+		operation.Security = &SecurityRequirements{seRequirement}
 	}
 
 	// =================================================================================================================
@@ -297,6 +322,11 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 }
 
 func (oai *OpenApiV3) removeOperationDuplicatedProperties(operation Operation) {
+	if len(operation.Parameters) == 0 {
+		// Nothing to do.
+		return
+	}
+
 	var (
 		duplicatedParameterNames []interface{}
 		dataField                string
@@ -319,10 +349,15 @@ func (oai *OpenApiV3) removeOperationDuplicatedProperties(operation Operation) {
 		}
 
 		// Check request body schema ref.
-		if schema := oai.Components.Schemas.Get(requestBodyContent.Schema.Ref); schema != nil {
-			schema.Value.Required = oai.removeItemsFromArray(schema.Value.Required, duplicatedParameterNames)
-			schema.Value.Properties.Removes(duplicatedParameterNames)
-			continue
+		if requestBodyContent.Schema.Ref != "" {
+			if schema := oai.Components.Schemas.Get(requestBodyContent.Schema.Ref); schema != nil {
+				newSchema := schema.Value.Clone()
+				requestBodyContent.Schema.Ref = ""
+				requestBodyContent.Schema.Value = newSchema
+				newSchema.Required = oai.removeItemsFromArray(newSchema.Required, duplicatedParameterNames)
+				newSchema.Properties.Removes(duplicatedParameterNames)
+				continue
+			}
 		}
 
 		// Check the Value public field for the request body.
@@ -364,6 +399,7 @@ func (oai *OpenApiV3) tagMapToPath(tagMap map[string]string, path *Path) error {
 	return nil
 }
 
+// MarshalJSON implements the interface MarshalJSON for json.Marshal.
 func (p Path) MarshalJSON() ([]byte, error) {
 	var (
 		b   []byte

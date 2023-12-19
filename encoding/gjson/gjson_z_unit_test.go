@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/gogf/gf/v2/util/gconv"
 )
@@ -376,7 +377,7 @@ func Test_Convert2(t *testing.T) {
 		j := gjson.New(`{"name":"gf","time":"2019-06-12"}`)
 		t.Assert(j.Interface().(g.Map)["name"], "gf")
 		t.Assert(j.Get("name1").Map(), nil)
-		t.AssertNE(j.GetJson("name1"), nil)
+		t.Assert(j.GetJson("name1"), nil)
 		t.Assert(j.GetJsons("name1"), nil)
 		t.Assert(j.GetJsonMap("name1"), nil)
 		t.Assert(j.Contains("name1"), false)
@@ -585,5 +586,17 @@ func Test_Issue1747(t *testing.T) {
 		err := gconv.Struct(gvar.New("[1, 2, 336371793314971759]"), &j)
 		t.AssertNil(err)
 		t.Assert(j.Get("2"), `336371793314971759`)
+	})
+}
+
+// https://github.com/gogf/gf/issues/2520
+func Test_Issue2520(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		type test struct {
+			Unique *gvar.Var `json:"unique"`
+		}
+
+		t2 := test{Unique: gvar.New(gtime.Date())}
+		t.Assert(gjson.MustEncodeString(t2), gjson.New(t2).MustToJsonString())
 	})
 }
